@@ -28,12 +28,26 @@ interface RenderOptions {
   jobs: Record<string, { status: string; progress: number; videoUrl?: string; error?: string }>;
 }
 
+// Clamp durationInFrames to max 60 per scene to keep memory low
+function clampScript(script: { scenes: Scene[] }) {
+  return {
+    ...script,
+    scenes: script.scenes.map(scene => ({
+      ...scene,
+      durationInFrames: Math.min(scene.durationInFrames || 60, 60),
+    })),
+  };
+}
+
 export async function renderVideo({ jobId, brandAssets, script, compositionId, jobs }: RenderOptions) {
   const outputDir = path.join(__dirname, '../output');
   if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
   const outputPath = path.join(outputDir, `${jobId}.mp4`);
   const remotionRoot = path.join(__dirname, '../remotion');
+
+  // Cap scenes to avoid OOM on free Railway tier
+  const clampedScript = clampScript(script);
 
   jobs[jobId] = { status: 'bundling', progress: 5 };
 
@@ -44,7 +58,7 @@ export async function renderVideo({ jobId, brandAssets, script, compositionId, j
 
   jobs[jobId] = { status: 'rendering', progress: 20 };
 
-  const inputProps = { brandAssets, script };
+  const inputProps = { brandAssets, script: clampedScript };
 
   const composition = await selectComposition({
     serveUrl: bundleLocation,
@@ -55,7 +69,6 @@ export async function renderVideo({ jobId, brandAssets, script, compositionId, j
   await renderMedia({
     composition: {
       ...composition,
-      // Override to 720p to reduce memory usage on Railway free tier
       width: 1280,
       height: 720,
     },
@@ -63,12 +76,10 @@ export async function renderVideo({ jobId, brandAssets, script, compositionId, j
     codec: 'h264',
     outputLocation: outputPath,
     inputProps,
-    // Limit concurrency to reduce memory pressure
+    // Single concurrency = much lower RAM usage
     concurrency: 1,
-    // Lower CRF = larger file, higher = more compression. 23 is a good balance.
-    chromiumOptions: {
-      disableWebSecurity: true,
-    },
+    // Disable audio to further reduce memory pressure
+    muted: false,
     onProgress: ({ progress }) => {
       jobs[jobId] = {
         status: 'rendering',
