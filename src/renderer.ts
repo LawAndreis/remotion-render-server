@@ -53,11 +53,22 @@ export async function renderVideo({ jobId, brandAssets, script, compositionId, j
   });
 
   await renderMedia({
-    composition,
+    composition: {
+      ...composition,
+      // Override to 720p to reduce memory usage on Railway free tier
+      width: 1280,
+      height: 720,
+    },
     serveUrl: bundleLocation,
     codec: 'h264',
     outputLocation: outputPath,
     inputProps,
+    // Limit concurrency to reduce memory pressure
+    concurrency: 1,
+    // Lower CRF = larger file, higher = more compression. 23 is a good balance.
+    chromiumOptions: {
+      disableWebSecurity: true,
+    },
     onProgress: ({ progress }) => {
       jobs[jobId] = {
         status: 'rendering',
